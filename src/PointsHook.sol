@@ -95,6 +95,10 @@ contract PointsHook is BaseHook, ERC1155 {
         BalanceDelta feesAccrued, // Fees collected during add
         bytes calldata hookData // Custom data from user
     ) internal override returns (bytes4, BalanceDelta) {
+
+        // check if this is an ETH-TOKEN pool with this hook attached, if not ignore
+         if (!key.currency0.isAddressZero()) return (this.afterAddLiquidity.selector, BalanceDelta.wrap(0));
+        if (sender == address(0)) return (this.afterAddLiquidity.selector, BalanceDelta.wrap(0));
         // Only mint points if liquidityDelta is positive (liquidity being added)
         if (params.liquidityDelta <= 0) return (this.afterAddLiquidity.selector, BalanceDelta.wrap(0));
 

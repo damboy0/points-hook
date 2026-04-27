@@ -46,7 +46,11 @@ contract TestPointsHook is Test, Deployers, ERC1155TokenReceiver {
         token.mint(address(1), 1000 ether);
 
         // Deploy hook to an address that has the proper flags set
-        uint160 flags = uint160(Hooks.AFTER_SWAP_FLAG);
+        uint160 flags = uint160(
+            Hooks.AFTER_SWAP_FLAG 
+            | Hooks.AFTER_ADD_LIQUIDITY_FLAG 
+            | Hooks.AFTER_REMOVE_LIQUIDITY_FLAG
+        );
         deployCodeTo("PointsHook.sol", abi.encode(manager), address(flags));
 
         // Deploy our hook
@@ -58,7 +62,7 @@ contract TestPointsHook is Test, Deployers, ERC1155TokenReceiver {
         token.approve(address(modifyLiquidityRouter), type(uint256).max);
 
         // Initialize a pool
-        (key, ) = initPool(
+        (key,) = initPool(
             ethCurrency, // Currency 0 = ETH
             tokenCurrency, // Currency 1 = TOKEN
             hook, // Hook Contract
@@ -71,16 +75,9 @@ contract TestPointsHook is Test, Deployers, ERC1155TokenReceiver {
         uint160 sqrtPriceAtTickUpper = TickMath.getSqrtPriceAtTick(60);
 
         uint256 ethToAdd = 0.1 ether;
-        uint128 liquidityDelta = LiquidityAmounts.getLiquidityForAmount0(
-            SQRT_PRICE_1_1,
-            sqrtPriceAtTickUpper,
-            ethToAdd
-        );
-        uint256 tokenToAdd = LiquidityAmounts.getAmount1ForLiquidity(
-            sqrtPriceAtTickLower,
-            SQRT_PRICE_1_1,
-            liquidityDelta
-        );
+        uint128 liquidityDelta = LiquidityAmounts.getLiquidityForAmount0(SQRT_PRICE_1_1, sqrtPriceAtTickUpper, ethToAdd);
+        uint256 tokenToAdd =
+            LiquidityAmounts.getAmount1ForLiquidity(sqrtPriceAtTickLower, SQRT_PRICE_1_1, liquidityDelta);
 
         modifyLiquidityRouter.modifyLiquidity{value: ethToAdd}(
             key,
@@ -96,10 +93,7 @@ contract TestPointsHook is Test, Deployers, ERC1155TokenReceiver {
 
     function test_swap() public {
         uint256 poolIdUint = uint256(PoolId.unwrap(key.toId()));
-        uint256 pointsBalanceOriginal = hook.balanceOf(
-            address(this),
-            poolIdUint
-        );
+        uint256 pointsBalanceOriginal = hook.balanceOf(address(this), poolIdUint);
 
         // Set user address in hook data
         bytes memory hookData = abi.encode(address(this));
@@ -115,16 +109,46 @@ contract TestPointsHook is Test, Deployers, ERC1155TokenReceiver {
                 amountSpecified: -0.001 ether, // Exact input for output swap
                 sqrtPriceLimitX96: TickMath.MIN_SQRT_PRICE + 1
             }),
-            PoolSwapTest.TestSettings({
-                takeClaims: false,
-                settleUsingBurn: false
+            PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            hookData
+        );
+        uint256 pointsBalanceAfterSwap = hook.balanceOf(address(this), poolIdUint);
+        assertEq(pointsBalanceAfterSwap - pointsBalanceOriginal, 2 * 10 ** 14);
+    }
+
+    function testAfterAddLiquidity() public {
+        uint256 poolIdUint = uint256(PoolId.unwrap(key.toId()));
+        uint256 pointsBalanceOriginal = hook.balanceOf(address(this), poolIdUint);
+
+        // Set user address in hook data
+        bytes memory hookData = abi.encode(address(this));
+
+        // Add liquidity to the pool
+        // We'll add 0.05 ether worth of liquidity
+        uint160 sqrtPriceAtTickLower = TickMath.getSqrtPriceAtTick(-60);
+        uint160 sqrtPriceAtTickUpper = TickMath.getSqrtPriceAtTick(60);
+
+        uint256 ethToAdd = 0.05 ether;
+        uint128 liquidityDelta = LiquidityAmounts.getLiquidityForAmount0(SQRT_PRICE_1_1, sqrtPriceAtTickUpper, ethToAdd);
+
+        // Approve max tokens (pool manager calculates exact amount needed)
+        token.approve(address(modifyLiquidityRouter), type(uint256).max);
+
+        // Add liquidity with hookData
+        modifyLiquidityRouter.modifyLiquidity{value: ethToAdd}(
+            key,
+            ModifyLiquidityParams({
+                tickLower: -60,
+                tickUpper: 60,
+                liquidityDelta: int256(uint256(liquidityDelta)),
+                salt: bytes32(0)
             }),
             hookData
         );
-        uint256 pointsBalanceAfterSwap = hook.balanceOf(
-            address(this),
-            poolIdUint
-        );
-        assertEq(pointsBalanceAfterSwap - pointsBalanceOriginal, 2 * 10 ** 14);
+
+        // Check that points were minted = 20% of liquidityDelta
+        uint256 pointsBalanceAfterAdd = hook.balanceOf(address(this), poolIdUint);
+        uint256 expectedPoints = uint256(liquidityDelta) / 5;
+        assertEq(pointsBalanceAfterAdd - pointsBalanceOriginal, expectedPoints);
     }
 }

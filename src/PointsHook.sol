@@ -17,29 +17,23 @@ import {Hooks} from "v4-core/libraries/Hooks.sol";
 contract PointsHook is BaseHook, ERC1155 {
     constructor(IPoolManager _manager) BaseHook(_manager) {}
 
-    function getHookPermissions()
-        public
-        pure
-        override
-        returns (Hooks.Permissions memory)
-    {
-        return
-            Hooks.Permissions({
-                beforeInitialize: false,
-                afterInitialize: false,
-                beforeAddLiquidity: false,
-                beforeRemoveLiquidity: false,
-                afterAddLiquidity: false,
-                afterRemoveLiquidity: false,
-                beforeSwap: false,
-                afterSwap: true,
-                beforeDonate: false,
-                afterDonate: false,
-                beforeSwapReturnDelta: false,
-                afterSwapReturnDelta: false,
-                afterAddLiquidityReturnDelta: false,
-                afterRemoveLiquidityReturnDelta: false
-            });
+    function getHookPermissions() public pure override returns (Hooks.Permissions memory) {
+        return Hooks.Permissions({
+            beforeInitialize: false,
+            afterInitialize: false,
+            beforeAddLiquidity: false,
+            beforeRemoveLiquidity: false,
+            afterAddLiquidity: true,
+            afterRemoveLiquidity: true,
+            beforeSwap: false,
+            afterSwap: true,
+            beforeDonate: false,
+            afterDonate: false,
+            beforeSwapReturnDelta: false,
+            afterSwapReturnDelta: false,
+            afterAddLiquidityReturnDelta: false,
+            afterRemoveLiquidityReturnDelta: false
+        });
     }
 
     function uri(uint256) public view virtual override returns (string memory) {
@@ -77,11 +71,7 @@ contract PointsHook is BaseHook, ERC1155 {
         return (this.afterSwap.selector, 0);
     }
 
-    function _assignPoints(
-        PoolId poolId,
-        bytes calldata hookData,
-        uint256 points
-    ) internal {
+    function _assignPoints(PoolId poolId, bytes calldata hookData, uint256 points) internal {
         // If no hookData is passed in, no points will be assigned to anyone
         if (hookData.length == 0) return;
 
@@ -96,4 +86,27 @@ contract PointsHook is BaseHook, ERC1155 {
         uint256 poolIdUint = uint256(PoolId.unwrap(poolId));
         _mint(user, poolIdUint, points, "");
     }
+
+    function _afterAddLiquidity(
+        address sender, // The LP adding liquidity
+        PoolKey calldata key, // Pool identifier
+        ModifyLiquidityParams calldata params, // Tick range & liquidity details
+        BalanceDelta delta, // Actual amounts added to pool
+        BalanceDelta feesAccrued, // Fees collected during add
+        bytes calldata hookData // Custom data from user
+    ) internal override returns (bytes4, BalanceDelta) {
+        // Only mint points if liquidityDelta is positive (liquidity being added)
+        if (params.liquidityDelta <= 0) return (this.afterAddLiquidity.selector, BalanceDelta.wrap(0));
+
+        // Calculate points equal to 20% of liquidity added
+        uint256 liquidityAmount = uint256(int256(params.liquidityDelta));
+        uint256 pointsForLiquidity = liquidityAmount / 5;
+
+        // Mint the points using the same helper as afterSwap
+        _assignPoints(key.toId(), hookData, pointsForLiquidity);
+
+        return (this.afterAddLiquidity.selector, BalanceDelta.wrap(0));
+    }
+
+  
 }
